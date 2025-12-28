@@ -116,7 +116,7 @@ class XAPIClient:
                     start_time=start_time,
                     end_time=end_time,
                     max_results=max_results,
-                    tweet_fields=["created_at"],
+                    tweet_fields=["created_at", "author_id", "referenced_tweets", "lang", "possibly_sensitive"],
                     pagination_token=pagination_token,
                 )
 
@@ -126,9 +126,29 @@ class XAPIClient:
 
                 # Extract tweet metadata
                 for tweet in response.data:
+                    # Determine tweet type from referenced_tweets
+                    is_retweet = False
+                    is_reply = False
+                    is_quote = False
+
+                    if hasattr(tweet, 'referenced_tweets') and tweet.referenced_tweets:
+                        for ref in tweet.referenced_tweets:
+                            if ref.type == 'retweeted':
+                                is_retweet = True
+                            elif ref.type == 'replied_to':
+                                is_reply = True
+                            elif ref.type == 'quoted':
+                                is_quote = True
+
                     tweets.append({
                         "id": tweet.id,
                         "created_at": tweet.created_at,
+                        "author_id": getattr(tweet, 'author_id', user_id),
+                        "is_retweet": is_retweet,
+                        "is_reply": is_reply,
+                        "is_quote": is_quote,
+                        "language": getattr(tweet, 'lang', None),
+                        "possibly_sensitive": getattr(tweet, 'possibly_sensitive', False),
                     })
 
                 self.logger.info(

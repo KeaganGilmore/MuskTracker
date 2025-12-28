@@ -114,6 +114,12 @@ class TweetIngestor:
                 tweet = RawTweet(
                     tweet_id=tweet_id,
                     created_at=tweet_data["created_at"],
+                    author_id=tweet_data.get("author_id", "44196397"),
+                    is_retweet=tweet_data.get("is_retweet", False),
+                    is_reply=tweet_data.get("is_reply", False),
+                    is_quote=tweet_data.get("is_quote", False),
+                    language=tweet_data.get("language"),
+                    possibly_sensitive=tweet_data.get("possibly_sensitive", False),
                     source="x_api_v2",
                     ingest_time=datetime.now(timezone.utc),
                     is_deleted=False,

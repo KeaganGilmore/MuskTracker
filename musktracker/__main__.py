@@ -37,6 +37,9 @@ main.add_command(ingest.ingest)
 main.add_command(enrich.enrich)
 main.add_command(train.train)
 main.add_command(forecast.forecast)
+main.add_command(import_csv.main, name="import-csv")
+main.add_command(process_data.main, name="process-data")
+main.add_command(fetch_gdelt.main, name="fetch-gdelt")
 
 
 if __name__ == "__main__":
