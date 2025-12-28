@@ -221,19 +221,18 @@ def main(
                             intensity=event['intensity'],
                             category=event['category'],
                             description=f"GDELT: {event['article_count']} articles, avg tone: {event['avg_tone']:.2f}",
-                            source="gdelt"
+                            source="gdelt",
+                            skip_duplicates=True  # Skip duplicates automatically
                         )
-                        added += 1
 
-                    except ValueError as e:
-                        if "already exists" in str(e).lower():
+                        if event_id is None:
                             duplicates += 1
                         else:
-                            errors += 1
-                            logger.error("Error adding event", event=event['name'], error=str(e))
+                            added += 1
+
                     except Exception as e:
                         errors += 1
-                        logger.error("Unexpected error", event=event['name'], error=str(e))
+                        logger.error("Error adding event", event=event['name'], error=str(e))
 
             click.echo("\n" + "=" * 80)
             click.echo("IMPORT SUMMARY")

@@ -27,66 +27,52 @@ class GDELTClient:
     TV_API_URL = "https://api.gdeltproject.org/api/v2/tv/tv"
 
     # Search terms for Elon Musk and related entities
+    # Split into batches to avoid GDELT query length limits
     MUSK_SPECIFIC_TERMS = [
-        "Elon Musk",
-        "Tesla",
-        "SpaceX",
-        "Neuralink",
-        "Boring Company",
-        "Twitter Musk",
-        "X Corp Musk",
+        ["Elon Musk", "Tesla", "SpaceX"],
+        ["Neuralink", "Boring Company"],
+        ["Twitter Musk", "X Corp Musk", "X.com Musk"],
     ]
 
     # General major event categories that Musk may react to
-    GENERAL_EVENT_TERMS = [
-        # Technology & Innovation
-        "AI breakthrough",
-        "artificial intelligence",
-        "tech regulation",
-        "cryptocurrency",
-        "Bitcoin",
-        "Dogecoin",
+    # Split into themed batches - each batch stays under GDELT query limit
+    TECH_TERMS = [
+        ["artificial intelligence", "AI regulation", "ChatGPT"],
+        ["cryptocurrency", "Bitcoin", "Dogecoin", "crypto regulation"],
+        ["tech regulation", "antitrust", "Section 230"],
+    ]
 
-        # Space & Science
-        "NASA announcement",
-        "space exploration",
-        "Mars mission",
-        "rocket launch",
+    SPACE_TERMS = [
+        ["NASA", "space launch", "rocket"],
+        ["Mars mission", "space exploration", "ISS"],
+    ]
 
-        # Politics & Policy (US & Global)
-        "US President",
-        "Federal Reserve",
-        "inflation rate",
-        "interest rates",
-        "government shutdown",
+    POLITICS_TERMS = [
+        ["US President", "White House", "election"],
+        ["Federal Reserve", "interest rates", "inflation"],
+        ["government shutdown", "Congress", "Senate"],
+    ]
 
-        # Business & Markets
-        "stock market crash",
-        "economic crisis",
-        "S&P 500",
-        "tech stock",
-        "IPO announcement",
+    MARKET_TERMS = [
+        ["stock market", "S&P 500", "Nasdaq"],
+        ["economic crisis", "recession", "market crash"],
+        ["tech stock", "IPO", "earnings report"],
+    ]
 
-        # Social & Cultural
-        "free speech",
-        "social media regulation",
-        "misinformation",
-        "content moderation",
+    SOCIAL_TERMS = [
+        ["free speech", "social media regulation"],
+        ["misinformation", "content moderation", "censorship"],
+    ]
 
-        # Energy & Climate
-        "climate change",
-        "renewable energy",
-        "oil prices",
-        "electric vehicle",
+    ENERGY_TERMS = [
+        ["climate change", "renewable energy", "carbon"],
+        ["oil prices", "electric vehicle", "EV"],
+    ]
 
-        # Tech Industry
-        "Silicon Valley",
-        "tech layoffs",
-        "Google",
-        "Apple",
-        "Microsoft",
-        "Amazon",
-        "Meta",
+    TECH_INDUSTRY_TERMS = [
+        ["Silicon Valley", "tech layoffs", "startup"],
+        ["Google", "Apple", "Microsoft"],
+        ["Amazon", "Meta", "OpenAI"],
     ]
 
     def __init__(self):
@@ -133,52 +119,123 @@ class GDELTClient:
         end_date: datetime,
         max_records: int = 250,
         mode: str = "artlist",
-        search_terms: Optional[List[str]] = None,
+        search_terms: Optional[List[List[str]]] = None,
         event_type: str = "musk_specific",
     ) -> pd.DataFrame:
-        """Fetch events from GDELT GEG API.
+        """Fetch events from GDELT GEG API using batched queries.
+
+        Handles multiple batched queries to get all data while respecting GDELT limits.
+        Automatically deduplicates results based on URL.
 
         Args:
             start_date: Start date for event search (UTC)
             end_date: End date for event search (UTC)
-            max_records: Maximum number of records to return (default 250, max 250)
+            max_records: Maximum number of records per query (default 250, max 250)
             mode: API mode - 'artlist' for article list or 'timeline' for timeline
-            search_terms: Custom search terms, or None to use defaults
+            search_terms: Custom search term batches, or None to use defaults
             event_type: Type of events - 'musk_specific', 'general', or 'both'
 
         Returns:
-            DataFrame with event data
+            DataFrame with event data (deduplicated by URL)
         """
         if search_terms is None:
-            if event_type == "musk_specific":
-                search_terms = self.MUSK_SPECIFIC_TERMS
-            elif event_type == "general":
-                search_terms = self.GENERAL_EVENT_TERMS
-            elif event_type == "both":
-                search_terms = self.MUSK_SPECIFIC_TERMS + self.GENERAL_EVENT_TERMS
-            else:
-                raise ValueError(f"Invalid event_type: {event_type}. Must be 'musk_specific', 'general', or 'both'")
+            # Get all batches based on event type
+            term_batches = []
 
+            if event_type == "musk_specific":
+                term_batches = self.MUSK_SPECIFIC_TERMS
+            elif event_type == "general":
+                term_batches = (self.TECH_TERMS + self.SPACE_TERMS +
+                              self.POLITICS_TERMS + self.MARKET_TERMS +
+                              self.SOCIAL_TERMS + self.ENERGY_TERMS +
+                              self.TECH_INDUSTRY_TERMS)
+            elif event_type == "both":
+                term_batches = (self.MUSK_SPECIFIC_TERMS + self.TECH_TERMS +
+                              self.SPACE_TERMS + self.POLITICS_TERMS +
+                              self.MARKET_TERMS + self.SOCIAL_TERMS +
+                              self.ENERGY_TERMS + self.TECH_INDUSTRY_TERMS)
+            else:
+                raise ValueError(f"Invalid event_type: {event_type}")
+        else:
+            term_batches = search_terms
+
+        self.logger.info(
+            "Fetching GDELT events in batches",
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+            event_type=event_type,
+            num_batches=len(term_batches)
+        )
+
+        # Fetch from each batch and combine
+        all_dfs = []
+
+        for i, batch_terms in enumerate(term_batches, 1):
+            self.logger.info(f"Fetching batch {i}/{len(term_batches)}", terms=batch_terms)
+
+            batch_df = self._fetch_single_query(
+                start_date, end_date, batch_terms, max_records, mode
+            )
+
+            if not batch_df.empty:
+                all_dfs.append(batch_df)
+
+            # Rate limiting between batches
+            if i < len(term_batches):
+                time.sleep(2)
+
+        # Combine all results
+        if not all_dfs:
+            self.logger.warning("No events found in any batch")
+            return pd.DataFrame()
+
+        combined_df = pd.concat(all_dfs, ignore_index=True)
+
+        # Deduplicate by URL
+        if 'url' in combined_df.columns:
+            original_count = len(combined_df)
+            combined_df = combined_df.drop_duplicates(subset=['url'], keep='first')
+            deduped_count = original_count - len(combined_df)
+
+            if deduped_count > 0:
+                self.logger.info(f"Removed {deduped_count} duplicate articles")
+
+        self.logger.info(f"Total unique events fetched: {len(combined_df)}")
+
+        return combined_df
+
+    def _fetch_single_query(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        search_terms: List[str],
+        max_records: int,
+        mode: str,
+    ) -> pd.DataFrame:
+        """Execute a single GDELT query with given search terms.
+
+        Args:
+            start_date: Start date (UTC)
+            end_date: End date (UTC)
+            search_terms: List of search terms for this query
+            max_records: Max records to return
+            mode: API mode
+
+        Returns:
+            DataFrame with results
+        """
         # GDELT accepts date format YYYYMMDDHHMMSS
         start_str = start_date.strftime("%Y%m%d%H%M%S")
         end_str = end_date.strftime("%Y%m%d%H%M%S")
 
-        # Combine search terms with OR
-        query = " OR ".join([f'"{term}"' for term in search_terms])
-
-        self.logger.info(
-            "Fetching GDELT events",
-            start_date=start_date.isoformat(),
-            end_date=end_date.isoformat(),
-            event_type=event_type,
-            query_terms=len(search_terms)
-        )
+        # Combine search terms with OR and wrap in parentheses (GDELT requirement)
+        query = "(" + " OR ".join([f'"{term}"' for term in search_terms]) + ")"
 
         params = {
             "query": query,
             "mode": mode,
             "format": "json",
-            "maxrecords": min(max_records, 250),  # GDELT max is 250
+            "maxrecords": min(max_records, 250),
             "startdatetime": start_str,
             "enddatetime": end_str,
             "sort": "datedesc",
@@ -186,19 +243,29 @@ class GDELTClient:
 
         try:
             response = self._make_request(self.GEG_API_URL, params)
-            data = response.json()
+
+            # Check if response is empty
+            if not response.text or response.text.strip() == "":
+                self.logger.warning("GDELT returned empty response")
+                return pd.DataFrame()
+
+            try:
+                data = response.json()
+            except ValueError as e:
+                self.logger.error("Failed to parse JSON", error=str(e), response_text=response.text[:200])
+                return pd.DataFrame()
 
             if "articles" not in data:
-                self.logger.warning("No articles found in GDELT response")
+                self.logger.warning("No articles in response")
                 return pd.DataFrame()
 
             df = pd.DataFrame(data["articles"])
-            self.logger.info("Fetched GDELT events", count=len(df))
+            self.logger.info(f"Fetched {len(df)} articles from batch")
 
             return df
 
         except Exception as e:
-            self.logger.error("Failed to fetch GDELT events", error=str(e))
+            self.logger.error("Failed to fetch batch", error=str(e))
             return pd.DataFrame()
 
     def fetch_tone_timeline(
@@ -211,6 +278,7 @@ class GDELTClient:
         """Fetch tone timeline from GDELT.
 
         This provides aggregated sentiment/tone data over time.
+        Uses only Musk-specific terms to keep query manageable.
 
         Args:
             start_date: Start date (UTC)
@@ -222,20 +290,17 @@ class GDELTClient:
             DataFrame with timeline data
         """
         if search_terms is None:
-            if event_type == "musk_specific":
-                search_terms = self.MUSK_SPECIFIC_TERMS
-            elif event_type == "general":
-                search_terms = self.GENERAL_EVENT_TERMS
-            elif event_type == "both":
-                search_terms = self.MUSK_SPECIFIC_TERMS + self.GENERAL_EVENT_TERMS
+            # Flatten the first batch for timeline (keep it simple)
+            if event_type in ["musk_specific", "both"]:
+                search_terms = self.MUSK_SPECIFIC_TERMS[0]  # Just use main Musk terms
             else:
-                raise ValueError(f"Invalid event_type: {event_type}")
+                search_terms = self.TECH_TERMS[0]  # Use first tech batch
 
         start_str = start_date.strftime("%Y%m%d%H%M%S")
         end_str = end_date.strftime("%Y%m%d%H%M%S")
 
-        # Combine search terms with OR
-        query = " OR ".join([f'"{term}"' for term in search_terms])
+        # Combine search terms with OR and wrap in parentheses
+        query = "(" + " OR ".join([f'"{term}"' for term in search_terms]) + ")"
 
         self.logger.info("Fetching GDELT tone timeline", event_type=event_type)
 

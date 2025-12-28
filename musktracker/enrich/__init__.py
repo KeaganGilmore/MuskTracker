@@ -26,8 +26,9 @@ class EventEnricher:
         description: Optional[str] = None,
         category: Optional[str] = None,
         source: str = "manual",
-    ) -> int:
-        """Add a new exogenous event.
+        skip_duplicates: bool = True,
+    ) -> Optional[int]:
+        """Add a new exogenous event with duplicate detection.
 
         Args:
             name: Event name
@@ -37,12 +38,13 @@ class EventEnricher:
             description: Optional event description
             category: Optional category (e.g., 'market', 'regulatory', 'product')
             source: Event source (default 'manual')
+            skip_duplicates: If True, skip events with same name and start date (default True)
 
         Returns:
-            Event ID
+            Event ID, or None if duplicate was skipped
 
         Raises:
-            ValueError: If intensity out of range or times invalid
+            ValueError: If intensity out of range, times invalid, or duplicate found (when skip_duplicates=False)
         """
         # Validate inputs
         if not 0.0 <= intensity <= 1.0:
@@ -58,6 +60,28 @@ class EventEnricher:
             event_end = event_end.replace(tzinfo=timezone.utc)
 
         with get_db_session() as session:
+            # Check for duplicates based on name and start date (within 1 day)
+            if skip_duplicates:
+                from sqlalchemy import and_, func
+                from datetime import timedelta
+
+                existing = session.query(ExogenousEvent).filter(
+                    and_(
+                        ExogenousEvent.name == name,
+                        ExogenousEvent.event_start >= event_start - timedelta(days=1),
+                        ExogenousEvent.event_start <= event_start + timedelta(days=1)
+                    )
+                ).first()
+
+                if existing:
+                    self.logger.info(
+                        "Skipping duplicate event",
+                        name=name,
+                        start=event_start.isoformat(),
+                        existing_id=existing.id
+                    )
+                    return None
+
             event = ExogenousEvent(
                 name=name,
                 description=description,
