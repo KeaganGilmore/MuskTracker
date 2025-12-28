@@ -1,0 +1,2 @@
+"""Statistical models module initialization."""
+

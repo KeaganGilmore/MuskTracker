@@ -1,0 +1,26 @@
+# Core dependencies
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+alembic>=1.13.0
+pandas>=2.0.0
+numpy>=1.24.0
+statsmodels>=0.14.0
+scipy>=1.11.0
+
+# Twitter/X API
+tweepy>=4.14.0
+tenacity>=8.2.0
+
+# Configuration & Environment
+python-dotenv>=1.0.0
+
+# Logging & Utilities
+python-dateutil>=2.8.0
+pytz>=2023.3
+
+# CLI
+click>=8.1.0
+
+# Optional: Hawkes processes (will implement custom if not available)
+# tick>=0.6.0.0
+
